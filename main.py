@@ -1,7 +1,8 @@
 import os
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
-from hyundai_kia_connect_api.exceptions import AuthenticationError
+from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
+from hyundai_kia_connect_api.exceptions import AuthenticationError, AuthenticationOTPRequired
 
 app = Flask(__name__)
 
@@ -52,10 +53,11 @@ def ensure_authenticated():
     """
     try:
         vehicle_manager.check_and_refresh_token()
+    except AuthenticationOTPRequired:
+        raise
     except AuthenticationError as e:
         raise AuthenticationError(
-            "Kia authentication failed. "
-            "Open the Kia app and complete 2FA, then retry."
+            "Kia authentication failed."
         ) from e
 
 
@@ -81,6 +83,40 @@ def get_vehicle_id():
 
     first_vehicle_id = next(iter(vehicles.keys()))
     return first_vehicle_id
+
+
+def otp_response(message):
+    return jsonify({
+        "error": "Authentication failed",
+        "details": message,
+        "action": "POST /send_otp first"
+    }), 401
+
+
+def authentication_failed_response(error):
+    return jsonify({
+        "error": "Authentication failed",
+        "details": str(error)
+    }), 401
+
+
+def parse_notify_type():
+    body = request.get_json(silent=True) or {}
+    notify_type = str(body.get("notify_type", "EMAIL")).upper()
+    if notify_type in ("SMS", "PHONE"):
+        return OTP_NOTIFY_TYPE.SMS
+    if notify_type == "EMAIL":
+        return OTP_NOTIFY_TYPE.EMAIL
+    raise ValueError("notify_type must be EMAIL or SMS")
+
+
+def otp_request_json(otp_request):
+    return {
+        "has_email": getattr(otp_request, "has_email", None),
+        "email": getattr(otp_request, "email", None),
+        "has_sms": getattr(otp_request, "has_sms", None),
+        "sms": getattr(otp_request, "sms", None),
+    }
 
 
 # =========================
@@ -110,11 +146,60 @@ def auth_status():
     try:
         ensure_authenticated()
         return jsonify({"status": "authenticated"}), 200
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
     except AuthenticationError as e:
+        return authentication_failed_response(e)
+
+
+@app.route("/send_otp", methods=["POST"])
+def send_otp():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        login_result = vehicle_manager.login()
+        if login_result is True:
+            return jsonify({"status": "authenticated"}), 200
+
+        notify_type = parse_notify_type()
+        vehicle_manager.send_otp(notify_type)
+
         return jsonify({
-            "status": "authentication_failed",
-            "message": str(e)
-        }), 401
+            "status": "otp_sent",
+            "notify_type": getattr(notify_type, "value", notify_type),
+            "otp": otp_request_json(login_result)
+        }), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    except AuthenticationError as e:
+        return authentication_failed_response(e)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/verify_otp", methods=["POST"])
+def verify_otp():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    body = request.get_json(silent=True) or {}
+    otp_code = body.get("otp")
+    if not otp_code:
+        return jsonify({"error": "Missing otp"}), 400
+
+    try:
+        vehicle_manager.verify_otp_and_complete_login(str(otp_code))
+        return jsonify({"status": "authenticated"}), 200
+
+    except AuthenticationError as e:
+        return authentication_failed_response(e)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/list_vehicles", methods=["GET"])
@@ -144,12 +229,11 @@ def list_vehicles():
             "vehicles": vehicle_list
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
     except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
+        return authentication_failed_response(e)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -179,12 +263,11 @@ def start_climate():
             "result": result
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
     except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
+        return authentication_failed_response(e)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -206,12 +289,11 @@ def stop_climate():
             "result": result
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
     except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
+        return authentication_failed_response(e)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -233,12 +315,11 @@ def unlock_car():
             "result": result
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
     except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
+        return authentication_failed_response(e)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -260,12 +341,11 @@ def lock_car():
             "result": result
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
     except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
+        return authentication_failed_response(e)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
