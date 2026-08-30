@@ -83,6 +83,19 @@ def get_vehicle_id():
     return first_vehicle_id
 
 
+def sportage_climate_options():
+    return ClimateRequestOptions(
+        set_temp=70,
+        duration=5,
+        climate=True,
+        defrost=False,
+        heating=0,
+        steering_wheel=0,
+        front_left_seat=4,
+        front_right_seat=4,
+    )
+
+
 # =========================
 # Logging
 # =========================
@@ -161,13 +174,10 @@ def start_climate():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        refresh_and_sync()
+        ensure_authenticated()
         vehicle_id = get_vehicle_id()
 
-        climate_options = ClimateRequestOptions(
-            set_temp=72,
-            duration=10
-        )
+        climate_options = sportage_climate_options()
 
         result = vehicle_manager.start_climate(vehicle_id, climate_options)
 

@@ -48,3 +48,12 @@ def test_start_climate_uses_sportage_preset_without_status_refresh(manager):
     assert options.steering_wheel == 0
     assert options.front_left_seat == 4
     assert options.front_right_seat == 4
+
+
+def test_start_climate_rejects_requests_without_secret(manager):
+    with main.app.test_client() as client:
+        response = client.post("/start_climate")
+
+    assert response.status_code == 403
+    assert response.get_json() == {"error": "Unauthorized"}
+    assert manager.method_calls == []
