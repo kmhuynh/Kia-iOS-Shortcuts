@@ -8,7 +8,7 @@ Provide a one-tap iOS Shortcut that requests a fixed remote climate profile for 
 
 The iOS Shortcut sends an authenticated HTTP POST to the existing Flask `/start_climate` route hosted on Vercel. The Flask service authenticates with Kia Connect through `hyundai-kia-connect-api`, selects the configured vehicle, and submits the fixed climate request. Kia Connect then delivers the command to the vehicle over its cellular connection.
 
-The Shortcut stores only the Vercel URL and a random API secret. Kia credentials and PIN remain Vercel environment variables.
+The Shortcut stores only the Vercel URL and a random API secret. Kia credentials, PIN, and a bootstrapped refresh-token session remain Vercel environment variables. A local interactive bootstrap completes Kia OTP once and exports only the access token, refresh token, stable device ID, and expiry; it does not export the account password or PIN.
 
 ## Climate Profile
 
@@ -33,7 +33,7 @@ The start route calls `ensure_authenticated()` and then sends the command. It do
 
 On success, the route returns HTTP 200 with `status: climate_started` and the Kia transaction identifier. Unauthorized requests return HTTP 403. Authentication failures return HTTP 401 with a useful action message, and unexpected Kia/API failures return HTTP 500.
 
-The iOS Shortcut displays a concise success or failure notification from the HTTP result.
+The iOS Shortcut checks the returned `status`. It displays success only for `climate_started` and otherwise displays the returned API error.
 
 ## Testing
 
@@ -41,4 +41,4 @@ Flask route tests replace the real vehicle manager with a mock. Tests verify aut
 
 ## Limitations
 
-This relies on an unofficial, reverse-engineered Kia API and may need maintenance when Kia changes authentication or command payloads. Kia may require OTP or app interaction after an authentication change. The Shortcut removes navigation steps but does not remove Kia's normal cloud-to-vehicle delay.
+This relies on an unofficial, reverse-engineered Kia API and may need maintenance when Kia changes authentication or command payloads. If Kia expires or revokes the refresh token, the local OTP bootstrap must be rerun and `KIA_TOKEN_JSON` replaced in Vercel. The Shortcut removes navigation steps but does not remove Kia's normal cloud-to-vehicle delay.

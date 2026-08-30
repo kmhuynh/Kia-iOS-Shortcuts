@@ -2,6 +2,7 @@ import os
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.exceptions import AuthenticationError
+from kia_token import token_from_json
 
 app = Flask(__name__)
 
@@ -13,6 +14,10 @@ PASSWORD = os.environ.get("KIA_PASSWORD")
 PIN = os.environ.get("KIA_PIN")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 VEHICLE_ID = os.environ.get("VEHICLE_ID")  # Optional
+KIA_TOKEN_JSON = os.environ.get("KIA_TOKEN_JSON")  # Optional, recommended for USA
+AUTH_RECOVERY_ACTION = (
+    "Run the token bootstrap and update KIA_TOKEN_JSON in Vercel"
+)
 
 missing = []
 if not USERNAME:
@@ -30,12 +35,20 @@ if missing:
 # =========================
 # Vehicle Manager
 # =========================
+saved_token = token_from_json(
+    KIA_TOKEN_JSON,
+    username=USERNAME,
+    password=PASSWORD,
+    pin=PIN,
+)
+
 vehicle_manager = VehicleManager(
     region=3,  # North America
     brand=1,   # KIA
     username=USERNAME,
     password=PASSWORD,
-    pin=str(PIN)
+    pin=str(PIN),
+    token=saved_token,
 )
 
 # =========================
@@ -55,7 +68,7 @@ def ensure_authenticated():
     except AuthenticationError as e:
         raise AuthenticationError(
             "Kia authentication failed. "
-            "Open the Kia app and complete 2FA, then retry."
+            f"{AUTH_RECOVERY_ACTION}."
         ) from e
 
 
@@ -161,7 +174,7 @@ def list_vehicles():
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "action": AUTH_RECOVERY_ACTION
         }), 401
 
     except Exception as e:
@@ -190,7 +203,7 @@ def start_climate():
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "action": AUTH_RECOVERY_ACTION
         }), 401
 
     except Exception as e:
@@ -217,7 +230,7 @@ def stop_climate():
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "action": AUTH_RECOVERY_ACTION
         }), 401
 
     except Exception as e:
@@ -244,7 +257,7 @@ def unlock_car():
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "action": AUTH_RECOVERY_ACTION
         }), 401
 
     except Exception as e:
@@ -271,7 +284,7 @@ def lock_car():
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "action": AUTH_RECOVERY_ACTION
         }), 401
 
     except Exception as e:

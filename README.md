@@ -38,6 +38,7 @@ Add these variables in the Vercel project settings:
 | `KIA_PIN` | Kia remote-command PIN |
 | `SECRET_KEY` | A long random secret used only by the Shortcut |
 | `VEHICLE_ID` | Kia vehicle ID; optional for an account with exactly one vehicle |
+| `KIA_TOKEN_JSON` | Durable Kia session produced by the bootstrap command below |
 
 Generate a strong secret on a Mac with:
 
@@ -45,9 +46,22 @@ Generate a strong secret on a Mac with:
 openssl rand -hex 32
 ```
 
-Do not put the Kia password or PIN in the iOS Shortcut. After adding or changing environment variables, redeploy the Vercel project.
+Do not put the Kia password or PIN in the iOS Shortcut.
 
-### 3. Verify the deployment
+### 3. Bootstrap the Kia session
+
+Kia USA can require OTP for a new API device. A Vercel function cannot complete that interactive step on its own, so create the session once from this repository on the Mac:
+
+```bash
+uv sync
+uv run python -m scripts.bootstrap_kia_token
+```
+
+The command reads `KIA_USERNAME`, `KIA_PASSWORD`, and `KIA_PIN` from your local environment when available. Otherwise, it prompts for them. It then sends an OTP using the email address or phone number registered with Kia.
+
+After verification, the command prints a compact JSON value. Create the `KIA_TOKEN_JSON` environment variable in Vercel with that exact value, then redeploy. The JSON contains Kia session tokens and a device identifier, but not your username, password, or PIN. Treat it as a secret.
+
+### 4. Verify the deployment
 
 Open the assigned Vercel URL. The root response should report `status: OK`.
 
@@ -75,9 +89,12 @@ A successful request returns JSON containing `"status": "climate_started"` and a
 3. Set the URL to `https://YOUR_PROJECT.vercel.app/start_climate`.
 4. Expand the action and set **Method** to **POST**.
 5. Under **Headers**, add `Authorization` with the exact value of `SECRET_KEY`.
-6. Add a **Show Notification** action after it with the text `Sportage climate request sent`.
-7. Name the Shortcut `Start Sportage Climate`.
-8. From the Shortcut details, add it to the Home Screen, a widget, or the Action Button.
+6. Add **Get Dictionary Value** and retrieve `status` from **Contents of URL**.
+7. Add an **If** action checking whether `status` is `climate_started`.
+8. In the success branch, add **Show Notification** with `Sportage climate started`.
+9. In the **Otherwise** branch, add **Show Result** using **Contents of URL** so authentication or Kia API errors remain visible.
+10. Name the Shortcut `Start Sportage Climate`.
+11. From the Shortcut details, add it to the Home Screen, a widget, or the Action Button.
 
 The Shortcut sends no request body; the climate profile is fixed in `main.py`.
 
@@ -115,7 +132,7 @@ All control and vehicle-list endpoints require the same `Authorization` header.
 
 ## Limitations and Safety
 
-- Kia may require OTP or another login verification. If authentication fails, open Kia Access, complete any requested verification, and retry.
+- Kia may eventually expire or revoke the refresh token. If the API returns an authentication error, rerun the bootstrap command, replace `KIA_TOKEN_JSON`, and redeploy.
 - Vercel cold starts and Kia's cloud-to-vehicle connection add some delay. The Shortcut removes app navigation; it does not make the vehicle receive commands instantly.
 - Remote commands require an active Kia Connect subscription and cellular coverage for both Kia's service and the vehicle.
 - Never use remote climate control or remote start in an enclosed or partially enclosed area without proper ventilation.

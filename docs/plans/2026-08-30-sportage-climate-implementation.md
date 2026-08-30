@@ -179,3 +179,14 @@ Expected: all tests pass.
 Run: `git status --short --branch`
 
 Expected: clean `feature/sportage-climate` branch.
+
+### Review Amendment: Durable Kia USA Authentication
+
+Independent review identified that Kia USA may require OTP and that Vercel instance memory cannot preserve the resulting refresh token across cold starts. The implementation therefore also:
+
+- Adds `kia_token.py` to serialize only access token, refresh token, device ID, and expiry while restoring account credentials from their existing environment variables.
+- Adds `scripts/bootstrap_kia_token.py` for a one-time local email/SMS OTP flow.
+- Adds `KIA_TOKEN_JSON` as a Vercel environment variable and restores it when constructing `VehicleManager`.
+- Returns an actionable bootstrap instruction when Kia authentication fails.
+- Updates the Shortcut recipe to show success only for `climate_started` and display API errors otherwise.
+- Adds unit tests for token validation, credential exclusion, OTP completion, existing-session handling, and authentication recovery responses.
