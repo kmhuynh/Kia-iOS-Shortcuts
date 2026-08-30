@@ -165,8 +165,11 @@ def start_climate():
         vehicle_id = get_vehicle_id()
 
         climate_options = ClimateRequestOptions(
-            set_temp=72,
-            duration=10
+            set_temp=70,
+            duration=5,
+            climate=True,
+            front_left_seat=4,
+            front_right_seat=4
         )
 
         result = vehicle_manager.start_climate(vehicle_id, climate_options)
