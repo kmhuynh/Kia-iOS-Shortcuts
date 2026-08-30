@@ -14,16 +14,23 @@
 
 **Files:**
 - Modify: `pyproject.toml`
+- Modify: `requirements.txt`
 - Modify: `uv.lock`
 - Create: `tests/test_main.py`
 
-**Step 1: Add pytest as a development dependency**
+**Step 1: Align local and Vercel Kia API versions**
+
+Run: `uv add "hyundai-kia-connect-api==4.27.2"`
+
+Pin `hyundai-kia-connect-api==4.27.2` in `requirements.txt` so Vercel deploys the same current release exercised by local tests.
+
+**Step 2: Add pytest as a development dependency**
 
 Run: `uv add --dev "pytest>=8.3,<9"`
 
 Expected: `pyproject.toml` gains a `dev` dependency group and `uv.lock` records pytest without changing runtime requirements.
 
-**Step 2: Write the failing start-climate route test**
+**Step 3: Write the failing start-climate route test**
 
 Create `tests/test_main.py` with environment variables set before importing `main`, replace `main.vehicle_manager` with a `MagicMock`, call the route through Flask's test client, and assert:
 
@@ -47,16 +54,16 @@ assert options.front_right_seat == 4
 
 Also assert the JSON success status and transaction ID.
 
-**Step 3: Run the focused test to verify it fails**
+**Step 4: Run the focused test to verify it fails**
 
 Run: `uv run pytest tests/test_main.py::test_start_climate_uses_sportage_preset_without_status_refresh -v`
 
 Expected: FAIL because the current route refreshes vehicle status and still uses 72 degrees for ten minutes without seat settings.
 
-**Step 4: Commit the failing test**
+**Step 5: Commit the failing test**
 
 ```bash
-git add pyproject.toml uv.lock tests/test_main.py
+git add pyproject.toml requirements.txt uv.lock tests/test_main.py
 git commit -m "test: specify Sportage climate shortcut profile"
 ```
 
