@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
 from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
 from hyundai_kia_connect_api.exceptions import AuthenticationError, AuthenticationOTPRequired
+from kia_token import token_from_json
 
 app = Flask(__name__)
 
@@ -14,6 +15,10 @@ PASSWORD = os.environ.get("KIA_PASSWORD")
 PIN = os.environ.get("KIA_PIN")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 VEHICLE_ID = os.environ.get("VEHICLE_ID")  # Optional
+KIA_TOKEN_JSON = os.environ.get("KIA_TOKEN_JSON")  # Optional, recommended for USA
+AUTH_RECOVERY_ACTION = (
+    "Run the token bootstrap and update KIA_TOKEN_JSON in Vercel"
+)
 
 missing = []
 if not USERNAME:
@@ -31,12 +36,20 @@ if missing:
 # =========================
 # Vehicle Manager
 # =========================
+saved_token = token_from_json(
+    KIA_TOKEN_JSON,
+    username=USERNAME,
+    password=PASSWORD,
+    pin=PIN,
+)
+
 vehicle_manager = VehicleManager(
     region=3,  # North America
     brand=1,   # KIA
     username=USERNAME,
     password=PASSWORD,
-    pin=str(PIN)
+    pin=str(PIN),
+    token=saved_token,
 )
 
 # =========================
@@ -85,6 +98,19 @@ def get_vehicle_id():
     return first_vehicle_id
 
 
+def sportage_climate_options():
+    return ClimateRequestOptions(
+        set_temp=70,
+        duration=5,
+        climate=True,
+        defrost=False,
+        heating=0,
+        steering_wheel=0,
+        front_left_seat=4,
+        front_right_seat=4,
+    )
+
+
 def otp_response(message):
     return jsonify({
         "error": "Authentication failed",
@@ -96,7 +122,8 @@ def otp_response(message):
 def authentication_failed_response(error):
     return jsonify({
         "error": "Authentication failed",
-        "details": str(error)
+        "details": str(error),
+        "action": AUTH_RECOVERY_ACTION
     }), 401
 
 
@@ -245,16 +272,10 @@ def start_climate():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        refresh_and_sync()
+        ensure_authenticated()
         vehicle_id = get_vehicle_id()
 
-        climate_options = ClimateRequestOptions(
-            set_temp=70,
-            duration=5,
-            climate=True,
-            front_left_seat=4,
-            front_right_seat=4
-        )
+        climate_options = sportage_climate_options()
 
         result = vehicle_manager.start_climate(vehicle_id, climate_options)
 
