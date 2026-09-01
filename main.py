@@ -111,6 +111,34 @@ def sportage_climate_options():
     )
 
 
+def summer_climate_options():
+    """Cool the cabin to 70F for 10 minutes with seats on max ventilation."""
+    return ClimateRequestOptions(
+        set_temp=70,
+        duration=10,
+        climate=True,
+        defrost=False,
+        heating=0,
+        steering_wheel=0,
+        front_left_seat=5,   # High Cool
+        front_right_seat=5,  # High Cool
+    )
+
+
+def winter_climate_options():
+    """Warm the cabin to 78F for 10 minutes with seat, wheel and glass heat."""
+    return ClimateRequestOptions(
+        set_temp=78,
+        duration=10,
+        climate=True,
+        defrost=True,
+        heating=1,           # rear window defogger + heated side mirrors
+        steering_wheel=1,    # heated steering wheel
+        front_left_seat=8,   # High Heat
+        front_right_seat=8,  # High Heat
+    )
+
+
 def otp_response(message):
     return jsonify({
         "error": "Authentication failed",
@@ -266,16 +294,48 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/start_climate", methods=["POST"])
-def start_climate():
+@app.route("/find_vehicle", methods=["GET"])
+def find_vehicle():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        refresh_and_sync()
+        vehicle = vehicle_manager.get_vehicle(get_vehicle_id())
+
+        latitude = vehicle.location_latitude
+        longitude = vehicle.location_longitude
+        if latitude is None or longitude is None:
+            return jsonify({"error": "Kia reported no location for this vehicle"}), 404
+
+        located_at = vehicle.location_last_updated_at
+
+        return jsonify({
+            "status": "success",
+            "latitude": latitude,
+            "longitude": longitude,
+            "maps_url": f"https://maps.apple.com/?ll={latitude},{longitude}&q=Sportage",
+            "located_at": located_at.isoformat() if located_at else None,
+        }), 200
+
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
+    except AuthenticationError as e:
+        return authentication_failed_response(e)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def run_climate_preset(climate_options):
+    """Send one climate preset to the car. Shared by the climate routes."""
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
         ensure_authenticated()
         vehicle_id = get_vehicle_id()
-
-        climate_options = sportage_climate_options()
 
         result = vehicle_manager.start_climate(vehicle_id, climate_options)
 
@@ -292,6 +352,21 @@ def start_climate():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/start_climate", methods=["POST"])
+def start_climate():
+    return run_climate_preset(sportage_climate_options())
+
+
+@app.route("/summer_climate", methods=["POST"])
+def summer_climate():
+    return run_climate_preset(summer_climate_options())
+
+
+@app.route("/winter_climate", methods=["POST"])
+def winter_climate():
+    return run_climate_preset(winter_climate_options())
 
 
 @app.route("/stop_climate", methods=["POST"])
