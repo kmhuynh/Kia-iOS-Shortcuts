@@ -139,18 +139,52 @@ def winter_climate_options():
     )
 
 
-# Kia's US API has no publicly documented horn/lights endpoint and the library
-# does not implement one, so these paths are guesses modelled on the endpoints
-# Kia US does expose (rems/door/lock, rems/start, ...). The first one Kia
-# accepts wins; once we know which, this collapses to a single entry.
-HORN_LIGHT_CANDIDATES = (
-    ("POST", "rems/hornlight"),
-    ("GET", "rems/hornlight"),
-    ("POST", "rems/horn"),
-    ("GET", "rems/horn"),
-    ("POST", "rems/hnl"),
-    ("GET", "rems/hnl"),
+# Kia's US API has no publicly documented horn/lights endpoint, but it tells us
+# which routes exist: errorCode 9000 means "no such route", 9001 means "route
+# exists, payload is wrong". So we probe with an empty body and hunt for 9001.
+# Kia calls this feature "hornlight" in its CCS2 API (ccs2/control/hornlight),
+# so most guesses below are that name nested the way US routes nest
+# (rems/door/lock, rems/start, ...).
+NO_SUCH_ROUTE = 9000
+
+CANDIDATE_PATHS = (
+    "rems/hornlight/on",
+    "rems/hornlight/start",
+    "rems/control/hornlight",
+    "rems/horn/light",
+    "rems/hornlights",
+    "rems/hornandlight",
+    "rems/light",
+    "rems/light/on",
+    "rems/lights",
+    "rems/lamp",
+    "rems/lamp/on",
+    "rems/hornlamp",
+    "rems/horn/on",
+    "rems/horn/start",
+    "rems/hnl/on",
+    "rems/rhl",
+    "rems/rhl/hnl",
+    "rems/rhl/light",
+    "rems/hazard",
+    "rems/hazard/on",
+    "rems/hazardlight",
+    "rems/panic",
+    "rems/alarm",
+    "rems/honk",
+    "rems/flash",
+    "rems/blink",
+    "rems/findmycar",
+    "rems/findcar",
+    "rems/locate",
+    "rcs/rhl/hnl",
+    "rcs/rhl/light",
+    "cmm/hornlight",
 )
+
+# Probed alongside every batch so we can tell a real run from a broken session:
+# rems/rvs is a known-good route (expect 9001), the other is known-fake (9000).
+PROBE_CONTROLS = ("rems/rvs", "rems/xyzzynotreal")
 
 
 def try_horn_light_path(vehicle, method, path):
@@ -158,6 +192,8 @@ def try_horn_light_path(vehicle, method, path):
 
     Bypasses the library's response wrappers on purpose: a wrong path should
     come back as a status code we can read, not an exception we have to parse.
+    An empty body is deliberate — a correct route answers 9001 rather than
+    actually firing the horn, so discovery stays silent.
     """
     api = vehicle_manager.api
     url = api.API_URL + path
@@ -172,16 +208,18 @@ def try_horn_light_path(vehicle, method, path):
         return {"method": method, "path": path, "error": str(e)}
 
     try:
-        kia_status_code = response.json()["status"]["statusCode"]
+        status = response.json()["status"]
+        error_code = status.get("errorCode")
+        message = status.get("errorMessage")
     except Exception:
-        kia_status_code = None
+        error_code = None
+        message = response.text[:120]
 
     return {
         "method": method,
         "path": path,
-        "http_status": response.status_code,
-        "kia_status_code": kia_status_code,
-        "body": response.text[:200],
+        "error_code": error_code,
+        "message": message,
     }
 
 
@@ -374,36 +412,45 @@ def find_vehicle():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/horn_lights", methods=["GET", "POST"])
-def horn_lights():
+@app.route("/probe_paths", methods=["GET", "POST"])
+def probe_paths():
+    """Hunt for Kia's real horn/lights route.
+
+    Anything that does not answer 9000 exists and is worth a closer look.
+    Batched with ?offset= and ?limit= to stay inside Vercel's request timeout;
+    ?path= probes a single route instead.
+    """
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
         ensure_authenticated()
         vehicle = vehicle_manager.get_vehicle(get_vehicle_id())
+        method = request.args.get("method", "POST").upper()
 
-        # ?path=rems/foo&method=POST tries exactly one path instead of the list.
-        path = request.args.get("path")
-        if path:
-            candidates = [(request.args.get("method", "POST").upper(), path)]
+        single_path = request.args.get("path")
+        if single_path:
+            paths = [single_path]
         else:
-            candidates = HORN_LIGHT_CANDIDATES
+            offset = int(request.args.get("offset", 0))
+            limit = int(request.args.get("limit", 12))
+            paths = list(CANDIDATE_PATHS[offset:offset + limit])
 
-        attempts = []
-        for method, candidate in candidates:
-            attempt = try_horn_light_path(vehicle, method, candidate)
-            attempts.append(attempt)
-            if attempt.get("kia_status_code") == 0:
-                return jsonify({
-                    "status": "horn_lights_triggered",
-                    "endpoint": f"{method} {candidate}",
-                }), 200
+        controls = {
+            path: try_horn_light_path(vehicle, method, path).get("error_code")
+            for path in PROBE_CONTROLS
+        }
+
+        results = [try_horn_light_path(vehicle, method, path) for path in paths]
+        hits = [r for r in results if r.get("error_code") != NO_SUCH_ROUTE]
 
         return jsonify({
-            "error": "Kia rejected every candidate horn/lights endpoint",
-            "attempts": attempts,
-        }), 502
+            "method": method,
+            "controls": controls,
+            "probed": len(results),
+            "hits": hits,
+            "all": {r["path"]: r.get("error_code") for r in results},
+        }), 200
 
     except AuthenticationOTPRequired as e:
         return otp_response(str(e))
