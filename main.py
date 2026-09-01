@@ -139,6 +139,52 @@ def winter_climate_options():
     )
 
 
+# Kia's US API has no publicly documented horn/lights endpoint and the library
+# does not implement one, so these paths are guesses modelled on the endpoints
+# Kia US does expose (rems/door/lock, rems/start, ...). The first one Kia
+# accepts wins; once we know which, this collapses to a single entry.
+HORN_LIGHT_CANDIDATES = (
+    ("POST", "rems/hornlight"),
+    ("GET", "rems/hornlight"),
+    ("POST", "rems/horn"),
+    ("GET", "rems/horn"),
+    ("POST", "rems/hnl"),
+    ("GET", "rems/hnl"),
+)
+
+
+def try_horn_light_path(vehicle, method, path):
+    """Send one candidate horn/lights request.
+
+    Bypasses the library's response wrappers on purpose: a wrong path should
+    come back as a status code we can read, not an exception we have to parse.
+    """
+    api = vehicle_manager.api
+    url = api.API_URL + path
+    headers = api.authed_api_headers(vehicle_manager.token, vehicle)
+
+    try:
+        if method == "POST":
+            response = api.session.post(url, json={}, headers=headers, timeout=3)
+        else:
+            response = api.session.get(url, headers=headers, timeout=3)
+    except Exception as e:
+        return {"method": method, "path": path, "error": str(e)}
+
+    try:
+        kia_status_code = response.json()["status"]["statusCode"]
+    except Exception:
+        kia_status_code = None
+
+    return {
+        "method": method,
+        "path": path,
+        "http_status": response.status_code,
+        "kia_status_code": kia_status_code,
+        "body": response.text[:200],
+    }
+
+
 def otp_response(message):
     return jsonify({
         "error": "Authentication failed",
@@ -294,7 +340,7 @@ def list_vehicles():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/find_vehicle", methods=["GET"])
+@app.route("/find_vehicle", methods=["GET", "POST"])
 def find_vehicle():
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
@@ -317,6 +363,47 @@ def find_vehicle():
             "maps_url": f"https://maps.apple.com/?ll={latitude},{longitude}&q=Sportage",
             "located_at": located_at.isoformat() if located_at else None,
         }), 200
+
+    except AuthenticationOTPRequired as e:
+        return otp_response(str(e))
+
+    except AuthenticationError as e:
+        return authentication_failed_response(e)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/horn_lights", methods=["GET", "POST"])
+def horn_lights():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        ensure_authenticated()
+        vehicle = vehicle_manager.get_vehicle(get_vehicle_id())
+
+        # ?path=rems/foo&method=POST tries exactly one path instead of the list.
+        path = request.args.get("path")
+        if path:
+            candidates = [(request.args.get("method", "POST").upper(), path)]
+        else:
+            candidates = HORN_LIGHT_CANDIDATES
+
+        attempts = []
+        for method, candidate in candidates:
+            attempt = try_horn_light_path(vehicle, method, candidate)
+            attempts.append(attempt)
+            if attempt.get("kia_status_code") == 0:
+                return jsonify({
+                    "status": "horn_lights_triggered",
+                    "endpoint": f"{method} {candidate}",
+                }), 200
+
+        return jsonify({
+            "error": "Kia rejected every candidate horn/lights endpoint",
+            "attempts": attempts,
+        }), 502
 
     except AuthenticationOTPRequired as e:
         return otp_response(str(e))
